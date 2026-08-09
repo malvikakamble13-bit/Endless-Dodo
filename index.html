@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Endless Dodo</title>
+<style>
+  :root{
+    --bg-top:#050414;
+    --bg-mid:#1a0f3d;
+    --bg-bottom:#2d1b5e;
+    --step:#ffb454;
+    --step-edge:#e0913a;
+    --player:#39ff8a;
+    --player-dark:#0fa350;
+    --text:#f4ecff;
+    --accent:#ff5d8f;
+    --boost:#ffd93d;
+    --boost-glow:#fff3b0;
+  }
+  html,body{
+    margin:0; padding:0; height:100%; overflow:hidden;
+    background:linear-gradient(180deg, var(--bg-top), var(--bg-mid) 55%, var(--bg-bottom));
+    font-family:'Trebuchet MS', Verdana, sans-serif;
+    -webkit-user-select:none; user-select:none;
+    touch-action:none;
+  }
+  #wrap{
+    position:relative; width:100%; height:100%;
+    display:flex; align-items:center; justify-content:center;
+  }
+  canvas{
+    background:transparent;
+    display:block;
+    touch-action:none;
+  }
+  #hud{
+    position:absolute; top:14px; left:0; right:0;
+    text-align:center; color:var(--text);
+    font-size:28px; font-weight:bold;
+    text-shadow:0 2px 6px rgba(0,0,0,.4);
+    pointer-events:none;
+    letter-spacing:1px;
+  }
+  #best{
+    font-size:14px; font-weight:normal; opacity:.75; margin-top:2px;
+  }
+  #boostTag{
+    margin-top:4px; font-size:14px; font-weight:bold;
+    color:#04180d; background:linear-gradient(90deg, var(--boost), var(--boost-glow));
+    border-radius:14px; padding:3px 12px;
+    box-shadow:0 0 14px rgba(255,217,61,0.8);
+  }
+  #boostTag.hidden{ display:none; }
+  #overlay{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    color:var(--text); text-align:center;
+    background:rgba(20,10,40,0.55);
+    backdrop-filter:blur(2px);
+  }
+  #overlay h1{
+    font-size:38px; margin:0 0 6px; color:var(--accent);
+    text-shadow:0 3px 10px rgba(0,0,0,.4);
+  }
+  #overlay p{ margin:4px 0; opacity:.9; }
+  #startBtn{
+    margin-top:18px; padding:12px 28px; font-size:18px; font-weight:bold;
+    border:none; border-radius:30px; cursor:pointer;
+    background:var(--accent); color:white;
+    box-shadow:0 6px 0 #b73f66;
+    transition:transform .05s;
+  }
+  #startBtn:active{ transform:translateY(4px); box-shadow:0 2px 0 #b73f66; }
+  #nameRow{
+    margin-top:14px; display:none; gap:8px; align-items:center;
+  }
+  #nameInput{
+    padding:9px 12px; border-radius:20px; border:none; outline:none;
+    font-size:15px; text-align:center; width:170px;
+    background:rgba(255,255,255,0.12); color:var(--text);
+    border:1px solid rgba(255,255,255,0.35);
+  }
+  #nameInput::placeholder{ color:rgba(244,236,255,0.5); }
+  #saveScoreBtn{
+    padding:9px 16px; border:none; border-radius:20px; cursor:pointer;
+    background:var(--player); color:#04180d; font-weight:bold; font-size:14px;
+  }
+  #scoreboard{
+    margin-top:20px; width:240px; max-height:220px; overflow-y:auto;
+    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15);
+    border-radius:14px; padding:10px 14px;
+  }
+  #scoreboard h2{
+    margin:0 0 8px; font-size:15px; letter-spacing:1px;
+    color:var(--player); text-align:center;
+  }
+  #scoreboard ol{
+    margin:0; padding:0 0 0 20px; text-align:left; font-size:14px;
+  }
+  #scoreboard li{ margin:3px 0; display:flex; justify-content:space-between; gap:10px; }
+  #scoreboard li span.sname{ opacity:.9; }
+  #scoreboard li span.spts{ font-weight:bold; color:var(--player); }
+  #scoreboard .empty{ opacity:.6; font-size:13px; text-align:center; }
+  #controls{
+    position:absolute; bottom:0; left:0; right:0; height:35%;
+    display:flex;
+  }
+  .ctrlBtn{
+    flex:1; opacity:0;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">0<div id="best">Best: 0</div><div id="boostTag" class="hidden">⚡ BOOST</div></div>
+  <canvas id="game"></canvas>
+  <div id="controls">
+    <div class="ctrlBtn" id="leftBtn"></div>
+    <div class="ctrlBtn" id="rightBtn"></div>
+  </div>
+  <div id="overlay">
+    <h1>ENDLESS DODO</h1>
+    <p>← / → or A / D to move, or tap left/right side of screen</p>
+    <p>Climb as high as you can. Don't fall behind!</p>
+    <button id="startBtn">Start Climbing</button>
+    <div id="nameRow">
+      <input id="nameInput" type="text" maxlength="12" placeholder="Your name">
+      <button id="saveScoreBtn">Save Score</button>
+    </div>
+    <div id="scoreboard">
+      <h2>TOP SCORES</h2>
+      <ol id="scoreList"></ol>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+  const bestEl = document.getElementById('best');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const leftBtn = document.getElementById('leftBtn');
+  const rightBtn = document.getElementById('rightBtn');
+
+  let W, H, DPR;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const maxW = Math.min(window.innerWidth, 480);
+    const maxH = window.innerHeight;
+    W = maxW; H = maxH;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', ()=>{ resize(); if (typeof buildStars === 'function') buildStars(); });
+  resize();
+
+  // ---- Game constants ----
+  const STEP_H = 46;      // vertical distance between steps
+  const STEP_W = 74;      // width of a step
+  const STEP_THICK = 16;  // visual thickness of a step
+  const GRAVITY = 0.62;
+  const JUMP_V = -12.5;
+  const BOOST_JUMP_V = -20;      // higher jump while boosted
+  const BOOST_HOPS = 5;          // number of bounces the boost lasts
+  const BOOSTER_CHANCE = 0.16;   // odds a new step spawns with a booster
+  const MOVE_SPEED = 4.2;
+  const PLAYER_R = 15;
+  const boostEl = document.getElementById('boostTag');
+
+  const SCORE_KEY = 'stairsScoreboard';
+  const NAME_KEY = 'stairsLastName';
+
+  function loadScores(){
+    try{
+      const raw = JSON.parse(localStorage.getItem(SCORE_KEY) || '[]');
+      return Array.isArray(raw) ? raw : [];
+    }catch(e){ return []; }
+  }
+  function saveScores(list){
+    localStorage.setItem(SCORE_KEY, JSON.stringify(list));
+  }
+  function bestScore(){
+    const list = loadScores();
+    return list.length ? list[0].score : 0;
+  }
+  function renderScoreboard(){
+    const list = loadScores();
+    const ol = document.getElementById('scoreList');
+    ol.innerHTML = '';
+    if (!list.length){
+      ol.innerHTML = '<li class="empty" style="list-style:none;">No scores yet \u2014 be the first!</li>';
+      return;
+    }
+    list.slice(0,5).forEach(entry=>{
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="sname">' + escapeHtml(entry.name) + '</span><span class="spts">' + entry.score.toLocaleString() + '</span>';
+      ol.appendChild(li);
+    });
+  }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function addScore(name, score){
+    const list = loadScores();
+    list.push({name: name || 'Anon', score});
+    list.sort((a,b)=>b.score - a.score);
+    saveScores(list.slice(0,20));
+  }
+
+  let best = bestScore();
+  bestEl.textContent = 'Best: ' + best.toLocaleString();
+  renderScoreboard();
+
+  let running = false;
+  let steps = [];
+  let player, cameraY, score, keys, stepIndex, gameOver;
+  let boostActive = false, boostHopsLeft = 0;
+
+  function randStepX(prevX){
+    // next step alternates side with some randomness, staying in bounds
+    const margin = 30;
+    const range = W - STEP_W - margin*2;
+    let nx;
+    do {
+      nx = margin + Math.random() * range;
+    } while (Math.abs(nx - prevX) < STEP_W * 0.5);
+    return nx;
+  }
+
+  function initGame(){
+    steps = [];
+    let x = W/2 - STEP_W/2;
+    let y = H - 120;
+    for (let i=0;i<40;i++){
+      steps.push({x, y, id:i, hasBooster: i>3 && Math.random()<BOOSTER_CHANCE, boosted:false});
+      x = randStepX(x);
+      y -= STEP_H;
+    }
+    stepIndex = 0;
+    player = {
+      x: steps[0].x + STEP_W/2,
+      y: steps[0].y - PLAYER_R,
+      vx:0, vy:0,
+      onGround:true,
+      facing:1
+    };
+    cameraY = 0;
+    score = 0;
+    gameOver = false;
+    keys = {left:false, right:false};
+    boostActive = false;
+    boostHopsLeft = 0;
+    boostEl.classList.add('hidden');
+  }
+
+  function spawnMoreSteps(){
+    // drop steps far behind the player so the array never grows without bound
+    steps = steps.filter(s => s.id >= stepIndex - 5);
+    // keep refilling ahead so there's always a runway — this is what makes
+    // the climb truly endless instead of stopping after the first batch
+    while (steps.length < 40){
+      const last = steps[steps.length-1];
+      const x = randStepX(last.x);
+      const y = last.y - STEP_H;
+      steps.push({x, y, id: last.id+1, hasBooster: Math.random()<BOOSTER_CHANCE, boosted:false});
+    }
+  }
+
+  function updateHud(){
+    hud.firstChild.textContent = score.toLocaleString();
+  }
+
+  function endGame(){
+    if (gameOver) return;
+    gameOver = true;
+    running = false;
+    if (score > best) best = score;
+    bestEl.textContent = 'Best: ' + best.toLocaleString();
+    overlay.style.display = 'flex';
+    overlay.querySelector('h1').textContent = 'YOU FELL!';
+    overlay.querySelector('p:nth-of-type(1)').textContent = 'Score: ' + score.toLocaleString() + '   Best: ' + best.toLocaleString();
+    overlay.querySelector('p:nth-of-type(2)').textContent = 'Enter your name to save your score.';
+    startBtn.textContent = 'Climb Again';
+
+    const nameRow = document.getElementById('nameRow');
+    const nameInput = document.getElementById('nameInput');
+    const saveScoreBtn = document.getElementById('saveScoreBtn');
+
+    if (score > 0){
+      nameRow.style.display = 'flex';
+      nameInput.value = localStorage.getItem(NAME_KEY) || '';
+      startBtn.style.display = 'none';
+
+      const doSave = ()=>{
+        const name = nameInput.value.trim().slice(0,12) || 'Anon';
+        localStorage.setItem(NAME_KEY, name);
+        addScore(name, score);
+        renderScoreboard();
+        nameRow.style.display = 'none';
+        startBtn.style.display = 'inline-block';
+        saveScoreBtn.removeEventListener('click', doSave);
+      };
+      saveScoreBtn.addEventListener('click', doSave);
+    } else {
+      renderScoreboard();
+    }
+  }
+
+  function step(){
+    if (!running) return;
+
+    // horizontal input
+    player.vx = 0;
+    if (keys.left){ player.vx = -MOVE_SPEED; player.facing = -1; }
+    if (keys.right){ player.vx = MOVE_SPEED; player.facing = 1; }
+
+    player.vy += GRAVITY;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // clamp horizontal to canvas
+    if (player.x < PLAYER_R) player.x = PLAYER_R;
+    if (player.x > W - PLAYER_R) player.x = W - PLAYER_R;
+
+    // collision with steps (only when falling)
+    player.onGround = false;
+    if (player.vy >= 0){
+      for (let s of steps){
+        const topY = s.y;
+        const withinX = player.x + PLAYER_R*0.6 > s.x && player.x - PLAYER_R*0.6 < s.x + STEP_W;
+        const prevBottom = player.y - player.vy + PLAYER_R;
+        const nowBottom = player.y + PLAYER_R;
+        if (withinX && prevBottom <= topY && nowBottom >= topY){
+          player.y = topY - PLAYER_R;
+
+          // pick up booster if present
+          if (s.hasBooster && !s.boosted){
+            s.boosted = true;
+            boostActive = true;
+            boostHopsLeft = BOOST_HOPS;
+            boostEl.classList.remove('hidden');
+          }
+
+          if (boostActive){
+            player.vy = BOOST_JUMP_V;
+            boostHopsLeft--;
+            boostEl.textContent = '⚡ BOOST x' + boostHopsLeft;
+            if (boostHopsLeft <= 0){
+              boostActive = false;
+              boostEl.classList.add('hidden');
+            }
+          } else {
+            player.vy = JUMP_V; // normal auto bounce
+          }
+
+          player.onGround = true;
+          if (s.id > stepIndex){
+            stepIndex = s.id;
+            score = stepIndex;
+            updateHud();
+            spawnMoreSteps();
+          }
+          break;
+        }
+      }
+    }
+
+    // camera follows player upward smoothly
+    const targetCamY = Math.max(0, (H*0.55) - player.y);
+    cameraY += (targetCamY - cameraY) * 0.14;
+
+    // fail condition: fallen below visible screen (relative to camera)
+    if (player.y - cameraY > H + 60){
+      endGame();
+    }
+
+    draw();
+    requestAnimationFrame(step);
+  }
+
+  // persistent starfield: multiple depth layers for parallax
+  let stars = [];
+  function buildStars(){
+    stars = [];
+    const layers = [
+      {count:40, size:[0.6,1.3], speed:0.12, alpha:0.35, color:'#ffffff'},
+      {count:26, size:[1.2,2.0], speed:0.28, alpha:0.55, color:'#cdb8ff'},
+      {count:14, size:[1.6,2.8], speed:0.5,  alpha:0.85, color:'#9fd8ff'}
+    ];
+    layers.forEach((layer, li)=>{
+      for (let i=0;i<layer.count;i++){
+        stars.push({
+          x: Math.random()*W,
+          y: Math.random()*(H+400) - 200,
+          r: layer.size[0] + Math.random()*(layer.size[1]-layer.size[0]),
+          speed: layer.speed,
+          alpha: layer.alpha,
+          color: layer.color,
+          twinkleSeed: Math.random()*Math.PI*2
+        });
+      }
+    });
+  }
+  buildStars();
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // starfield
+    ctx.save();
+    const t = performance.now()/600;
+    for (const s of stars){
+      const dy = ((s.y - cameraY*s.speed) % (H+400) + (H+400)) % (H+400) - 200;
+      const twinkle = 0.65 + 0.35*Math.sin(t + s.twinkleSeed);
+      ctx.globalAlpha = s.alpha * twinkle;
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.arc(s.x, dy, s.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(0, cameraY);
+
+    // steps
+    for (let s of steps){
+      const sy = s.y;
+      if (sy > H + 100 - cameraY || sy < -100 - cameraY) continue;
+      // shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(s.x+4, sy+STEP_THICK, STEP_W, 6);
+      // step body
+      const grad = ctx.createLinearGradient(0, sy, 0, sy+STEP_THICK);
+      grad.addColorStop(0, getCss('--step'));
+      grad.addColorStop(1, getCss('--step-edge'));
+      ctx.fillStyle = grad;
+      roundRect(ctx, s.x, sy, STEP_W, STEP_THICK, 6);
+      ctx.fill();
+      // little highlight marker if it's the highest reached
+      if (s.id === stepIndex){
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.fillRect(s.x, sy-2, STEP_W, 2);
+      }
+
+      // floating power booster icon
+      if (s.hasBooster && !s.boosted){
+        const cx = s.x + STEP_W/2;
+        const bob = Math.sin(performance.now()/260 + s.id) * 4;
+        const cy = sy - 26 + bob;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.shadowColor = getCss('--boost');
+        ctx.shadowBlur = 16;
+        // glow disc
+        const gg = ctx.createRadialGradient(0,0,2,0,0,16);
+        gg.addColorStop(0, 'rgba(255,243,176,0.9)');
+        gg.addColorStop(1, 'rgba(255,217,61,0)');
+        ctx.fillStyle = gg;
+        ctx.beginPath();
+        ctx.arc(0,0,16,0,Math.PI*2);
+        ctx.fill();
+        // lightning bolt
+        ctx.fillStyle = getCss('--boost');
+        ctx.beginPath();
+        ctx.moveTo(2,-11);
+        ctx.lineTo(-7,2);
+        ctx.lineTo(-1,2);
+        ctx.lineTo(-3,11);
+        ctx.lineTo(8,-2);
+        ctx.lineTo(1,-2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // player
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    const squish = Math.min(1, Math.max(-1, player.vy/14));
+    ctx.scale(1 - squish*0.08, 1 + squish*0.08);
+
+    if (boostActive){
+      ctx.save();
+      ctx.shadowColor = getCss('--boost');
+      ctx.shadowBlur = 22;
+      const ag = ctx.createRadialGradient(0,0,PLAYER_R*0.6,0,0,PLAYER_R*1.9);
+      ag.addColorStop(0,'rgba(255,217,61,0.55)');
+      ag.addColorStop(1,'rgba(255,217,61,0)');
+      ctx.fillStyle = ag;
+      ctx.beginPath();
+      ctx.arc(0,0,PLAYER_R*1.9,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const pg = ctx.createRadialGradient(-4,-4,2,0,0,PLAYER_R);
+    pg.addColorStop(0, getCss('--player'));
+    pg.addColorStop(1, getCss('--player-dark'));
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.arc(0,0,PLAYER_R,0,Math.PI*2);
+    ctx.fill();
+
+    // ---- facial expression ----
+    // energy: boosted | sad: falling fast (missed a step) | happy: normal climbing
+    const expr = boostActive ? 'energy' : (player.vy > 10 ? 'sad' : 'happy');
+    const eyeOff = player.facing*3;
+    ctx.lineCap = 'round';
+
+    if (expr === 'happy'){
+      // round content eyes
+      ctx.fillStyle = '#123';
+      ctx.beginPath();
+      ctx.arc(eyeOff-2,-3,2.1,0,Math.PI*2);
+      ctx.arc(eyeOff+5,-3,2.1,0,Math.PI*2);
+      ctx.fill();
+      // smile (U-shaped arc)
+      ctx.strokeStyle = '#123';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(eyeOff+1.5, 2, 4.5, 0.15*Math.PI, 0.85*Math.PI, false);
+      ctx.stroke();
+
+    } else if (expr === 'sad'){
+      // worried eyebrows angled down toward center
+      ctx.strokeStyle = '#123';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(eyeOff-5,-7); ctx.lineTo(eyeOff-1,-5);
+      ctx.moveTo(eyeOff+8,-7); ctx.lineTo(eyeOff+4,-5);
+      ctx.stroke();
+      // droopy eyes
+      ctx.fillStyle = '#123';
+      ctx.beginPath();
+      ctx.arc(eyeOff-2,-2,1.9,0,Math.PI*2);
+      ctx.arc(eyeOff+5,-2,1.9,0,Math.PI*2);
+      ctx.fill();
+      // frown (inverted arc)
+      ctx.beginPath();
+      ctx.arc(eyeOff+1.5, 8.5, 4.5, 1.15*Math.PI, 1.85*Math.PI, false);
+      ctx.stroke();
+      // little tear
+      ctx.fillStyle = '#7fd4ff';
+      ctx.beginPath();
+      ctx.moveTo(eyeOff-2, 0.5);
+      ctx.quadraticCurveTo(eyeOff-4.5, 4.5, eyeOff-2, 6);
+      ctx.quadraticCurveTo(eyeOff+0.2, 4.5, eyeOff-2, 0.5);
+      ctx.fill();
+
+    } else { // energy
+      // sparkly star eyes
+      ctx.fillStyle = '#123';
+      drawStar(ctx, eyeOff-2, -3, 3.2, 5);
+      drawStar(ctx, eyeOff+5, -3, 3.2, 5);
+      // big excited open mouth
+      ctx.fillStyle = '#123';
+      ctx.beginPath();
+      ctx.ellipse(eyeOff+1.5, 5, 3, 4, 0, 0, Math.PI*2);
+      ctx.fill();
+      // radiating sparkle lines around the face
+      ctx.strokeStyle = getCss('--boost');
+      ctx.lineWidth = 1.4;
+      const sTime = performance.now()/150;
+      for (let i=0;i<5;i++){
+        const ang = (i/5)*Math.PI*2 + sTime;
+        const r1 = PLAYER_R+3, r2 = PLAYER_R+8;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang)*r1, Math.sin(ang)*r1);
+        ctx.lineTo(Math.cos(ang)*r2, Math.sin(ang)*r2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function getCss(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+
+  function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function drawStar(ctx, cx, cy, r, points){
+    const inner = r*0.45;
+    ctx.beginPath();
+    for (let i=0;i<points*2;i++){
+      const rad = i%2===0 ? r : inner;
+      const ang = (Math.PI/points)*i - Math.PI/2;
+      const px = cx + Math.cos(ang)*rad;
+      const py = cy + Math.sin(ang)*rad;
+      if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function startGame(){
+    initGame();
+    overlay.style.display = 'none';
+    document.getElementById('nameRow').style.display = 'none';
+    startBtn.style.display = 'inline-block';
+    running = true;
+    updateHud();
+    requestAnimationFrame(step);
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  // keyboard
+  window.addEventListener('keydown', e=>{
+    if (e.key === 'ArrowLeft' || e.key.toLowerCase()==='a') keys.left = true;
+    if (e.key === 'ArrowRight' || e.key.toLowerCase()==='d') keys.right = true;
+  });
+  window.addEventListener('keyup', e=>{
+    if (e.key === 'ArrowLeft' || e.key.toLowerCase()==='a') keys.left = false;
+    if (e.key === 'ArrowRight' || e.key.toLowerCase()==='d') keys.right = false;
+  });
+
+  // touch / mouse controls (left/right half of screen)
+  function bindHold(el, onDown, onUp){
+    el.addEventListener('pointerdown', e=>{ e.preventDefault(); onDown(); });
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointerleave', onUp);
+    el.addEventListener('pointercancel', onUp);
+  }
+  bindHold(leftBtn, ()=>keys.left=true, ()=>keys.left=false);
+  bindHold(rightBtn, ()=>keys.right=true, ()=>keys.right=false);
+  document.getElementById('controls').style.pointerEvents = 'auto';
+
+  // prevent page scroll on touch
+  document.body.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
+
+  // draw idle background before start
+  keys = {left:false,right:false};
+  initGame();
+  draw();
+})();
+</script>
+</body>
+</html>
